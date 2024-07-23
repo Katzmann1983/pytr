@@ -1,4 +1,5 @@
 import re
+import json
 
 from concurrent.futures import as_completed
 from pathlib import Path
@@ -10,6 +11,9 @@ from pathvalidate import sanitize_filepath
 from pytr.utils import preview, get_logger
 from pytr.api import TradeRepublicError
 from pytr.timeline import Timeline
+from .event import Document
+from .transactions import export_transactions
+
 
 class DL:
     def __init__(
@@ -67,86 +71,61 @@ class DL:
 
     async def dl_loop(self):
         await self.tl.get_next_timeline_transactions()
-
         while True:
             try:
-                _subscription_id, subscription, response = await self.tr.recv()
+                _, subscription, response = await self.tr.recv()
+                if subscription['type'] == 'timelineTransactions':
+                    await self.tl.get_next_timeline_transactions(response)
+                elif subscription['type'] == 'timelineActivityLog':
+                    await self.tl.get_next_timeline_activity_log(response)
+                elif subscription['type'] == 'timelineDetailV2':
+                    await self.tl.process_timelineDetail(response, self)
+                    if self.tl.received_detail == self.tl.requested_detail:
+                        break
+                else:
+                    self.log.warning(f"unmatched subscription of type '{subscription['type']}':\n{preview(response)}")
             except TradeRepublicError as e:
                 self.log.fatal(str(e))
+        
+        self.log.info('Received all details')        
+        self.output_path.mkdir(parents=True, exist_ok=True)
+        with open(self.output_path / 'other_events.json', 'w', encoding='utf-8') as f:
+            json.dump(self.tl.events_without_docs, f, ensure_ascii=False, indent=2)
 
-            if subscription['type'] == 'timelineTransactions':
-                await self.tl.get_next_timeline_transactions(response)
-            elif subscription['type'] == 'timelineActivityLog':
-                await self.tl.get_next_timeline_activity_log(response)
-            elif subscription['type'] == 'timelineDetailV2':
-                await self.tl.process_timelineDetail(response, self)
-            else:
-                self.log.warning(f"unmatched subscription of type '{subscription['type']}':\n{preview(response)}")
+        with open(self.output_path / 'events_with_documents.json', 'w', encoding='utf-8') as f:
+            json.dump(self.tl.events_with_docs, f, ensure_ascii=False, indent=2)
 
-    def dl_doc(self, doc, titleText, subtitleText, subfolder=None):
+        with open(self.output_path / 'all_events.json', 'w', encoding='utf-8') as f:
+            json.dump(self.tl.events_without_docs + self.tl.events_with_docs, f, ensure_ascii=False, indent=2)
+        export_transactions(self.output_path / 'all_events.json', self.output_path / 'account_transactions.csv')
+        self.work_responses()
+
+    def dl_doc(self, doc: Document):
         '''
         send asynchronous request, append future with filepath to self.futures
         '''
+
         doc_url = doc['action']['payload']
-        if subtitleText is None:
-            subtitleText = ''
+        
+        filename = doc.get_filename(self.filename_fmt)
 
-        try:
-            date = doc['detail']
-            iso_date = '-'.join(date.split('.')[::-1])
-        except KeyError:
-            date = ''
-            iso_date = ''
-        doc_id = doc['id']
-
-        # extract time from subtitleText
-        try:
-            time = re.findall('um (\\d+:\\d+) Uhr', subtitleText)
-            if time == []:
-                time = ''
-            else:
-                time = f' {time[0]}'
-        except TypeError:
-            time = ''
-
-        if subfolder is not None:
-            directory = self.output_path / subfolder
-        else:
-            directory = self.output_path
-
-        # If doc_type is something like 'Kosteninformation 2', then strip the 2 and save it in doc_type_num
-        doc_type = doc['title'].rsplit(' ')
-        if doc_type[-1].isnumeric() is True:
-            doc_type_num = f' {doc_type.pop()}'
-        else:
-            doc_type_num = ''
-
-        doc_type = ' '.join(doc_type)
-        titleText = titleText.replace('\n', '').replace('/', '-')
-        subtitleText = subtitleText.replace('\n', '').replace('/', '-')
-
-        filename = self.filename_fmt.format(
-            iso_date=iso_date, time=time, title=titleText, subtitle=subtitleText, doc_num=doc_type_num, id=doc_id
-        )
-
-        filename_with_doc_id = filename + f' ({doc_id})'
-
-        if doc_type in ['Kontoauszug', 'Depotauszug']:
-            filepath = directory / 'Abschlüsse' / f'{filename}' / f'{doc_type}.pdf'
-            filepath_with_doc_id = directory / 'Abschlüsse' / f'{filename_with_doc_id}' / f'{doc_type}.pdf'
-        else:
-            filepath = directory / doc_type / f'{filename}.pdf'
-            filepath_with_doc_id = directory / doc_type / f'{filename_with_doc_id}.pdf'
+        filepath = doc.get_filepath(self.output_path, self.filename_fmt)
 
         if self.universal_filepath:
             filepath = sanitize_filepath(filepath, '_', 'universal')
-            filepath_with_doc_id = sanitize_filepath(filepath_with_doc_id, '_', 'universal')
         else:
             filepath = sanitize_filepath(filepath, '_', 'auto')
-            filepath_with_doc_id = sanitize_filepath(filepath_with_doc_id, '_', 'auto')
+
+        def add_doc_id(filepath, filename, doc_id):
+            filepath = str(filepath)
+            start = filepath[:filepath.find(filename)]
+            end = filepath[filepath.find(filename)+len(filename):]
+            filepath = start + f"{filename}_{doc_id}" + end
+            return Path(filepath)
 
         if filepath in self.filepaths:
-            self.log.debug(f'File {filepath} already in queue. Append document id {doc_id}...')
+            self.log.debug(f"File {filepath} already in queue. Append document id {doc['id']}...")
+            filepath_with_doc_id = add_doc_id(filepath, filename, doc['id'])
             if filepath_with_doc_id in self.filepaths:
                 self.log.debug(f'File {filepath_with_doc_id} already in queue. Skipping...')
                 return
@@ -155,7 +134,7 @@ class DL:
         doc['local filepath'] = str(filepath)
         self.filepaths.append(filepath)
 
-        if filepath.is_file() is False:
+        if not filepath.is_file():
             doc_url_base = doc_url.split('?')[0]
             if doc_url_base in self.doc_urls:
                 self.log.debug(f'URL {doc_url_base} already in queue. Skipping...')

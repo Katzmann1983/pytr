@@ -1,8 +1,7 @@
 from datetime import datetime
-import json
 
 from .utils import get_logger
-from .transactions import export_transactions
+from .event import Event
 
 class Timeline:
     def __init__(self, tr, max_age_timestamp):
@@ -120,8 +119,8 @@ class Timeline:
         '''
 
         self.received_detail += 1
-        event = self.timeline_events[response['id']]
-        event['details'] = response
+        event = Event(self.timeline_events[response['id']])
+        event.set_details(response)
 
         max_details_digits = len(str(self.requested_detail))
         self.log.info(
@@ -129,48 +128,13 @@ class Timeline:
             + f"{event['title']} -- {event['subtitle']} - {event['timestamp'][:19]}"
         )
 
-        subfolder = {
-                'benefits_saveback_execution': 'Saveback',
-                'benefits_spare_change_execution': 'RoundUp',
-                'ssp_corporate_action_invoice_cash': 'Dividende',
-                'CREDIT': 'Dividende',
-                'INTEREST_PAYOUT_CREATED': 'Zinsen',
-                "SAVINGS_PLAN_EXECUTED":'Sparplan'
-            }.get(event["eventType"])
+        documents = event.get_documents(response)
+        for doc in documents:
+            if self.max_age_timestamp == 0 or self.max_age_timestamp < doc.timestamp:
+                dl.dl_doc(doc)
 
-        event['has_docs'] = False
-        for section in response['sections']:
-            if section['type'] != 'documents':
-                continue
-            for doc in section['data']:
-                event['has_docs'] = True
-                try:
-                    timestamp = datetime.strptime(doc['detail'], '%d.%m.%Y').timestamp()
-                except (ValueError, KeyError):
-                    timestamp = datetime.now().timestamp()
-                if self.max_age_timestamp == 0 or self.max_age_timestamp < timestamp:
-                    title = f"{doc['title']} - {event['title']}"
-                    if event['eventType'] in ["ACCOUNT_TRANSFER_INCOMING", "ACCOUNT_TRANSFER_OUTGOING", "CREDIT"]:
-                        title += f" - {event['subtitle']}"
-                    dl.dl_doc(doc, title, doc.get('detail'), subfolder)
-
-        if event['has_docs']:
-            self.events_with_docs.append(event)
+        if len(documents) > 0:
+            self.events_with_docs.append(event.json)
         else:
-            self.events_without_docs.append(event)
-
-        if self.received_detail == self.requested_detail:
-            self.log.info('Received all details')
-            dl.output_path.mkdir(parents=True, exist_ok=True)
-            with open(dl.output_path / 'other_events.json', 'w', encoding='utf-8') as f:
-                json.dump(self.events_without_docs, f, ensure_ascii=False, indent=2)
-
-            with open(dl.output_path / 'events_with_documents.json', 'w', encoding='utf-8') as f:
-                json.dump(self.events_with_docs, f, ensure_ascii=False, indent=2)
-
-            with open(dl.output_path / 'all_events.json', 'w', encoding='utf-8') as f:
-                json.dump(self.events_without_docs + self.events_with_docs, f, ensure_ascii=False, indent=2)
-
-            export_transactions(dl.output_path / 'all_events.json', dl.output_path / 'account_transactions.csv')
-
-            dl.work_responses()
+            self.events_without_docs.append(event.json)
+        
