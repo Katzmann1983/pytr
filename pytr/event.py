@@ -99,19 +99,18 @@ class Document(UserDict):
 class Event(UserDict):
     def __init__(self, event_json):
         super().__init__(event_json)
-        self.json = event_json
         self.shares = ""
         self.isin = ""
-        self.eventType = self.json.get("eventType", "")
+        self.eventType = self.get("eventType", "")
 
         self.subfolder = subfolder.get(self.eventType, "")
         self.pp_type = tr_eventType_to_pp_type.get(self.eventType, "")
-        self.body = self.json.get("body", "")
+        self.body = self.get("body", "")
         self.process_event()
 
     @property
     def date(self):
-        dateTime = datetime.fromisoformat(self.json["timestamp"][:19])
+        dateTime = datetime.fromisoformat(self["timestamp"][:19])
         return dateTime.strftime("%Y-%m-%d")
 
     @property
@@ -120,34 +119,34 @@ class Event(UserDict):
 
     @property
     def amount(self):
-        return str(self.json["amount"]["value"])
+        return str(self["amount"]["value"])
 
     @property
     def note(self):
-        if self.json["eventType"].find("card_") == 0:
-            return self.json["eventType"]
+        if self["eventType"].find("card_") == 0:
+            return self["eventType"]
         else:
             return ""
 
     @property
     def title(self):
-        return self.json.get("title", "")
+        return self.get("title", "")
 
     @property
     def subtitle(self):
         if self.eventType in ["ACCOUNT_TRANSFER_INCOMING", "ACCOUNT_TRANSFER_OUTGOING", "CREDIT"]:
-            return self.json.get("subtitle", "")
+            return self.get("subtitle", "")
 
     def determine_pp_type(self):
         if self.pp_type == "TRADE_INVOICE":
-            if self.json["amount"]["value"] < 0:
+            if self["amount"]["value"] < 0:
                 self.pp_type = "BUY"
             else:
                 self.pp_type = "SELL"
 
     def determine_shares(self):
         if self.pp_type == "TRADE_INVOICE":
-            sections = self.json.get("details", {}).get("sections", [{}])
+            sections = self.get("details", {}).get("sections", [{}])
             for section in sections:
                 if section.get("title") == "Transaktion":
                     self.shares = section.get("data", [{}])[0]["detail"][
@@ -156,8 +155,8 @@ class Event(UserDict):
 
     def determine_isin(self):
         if self.pp_type in ("DIVIDENDS", "TRADE_INVOICE"):
-            sections = self.json.get("details", {}).get("sections", [{}])
-            self.isin = self.json.get("icon", "")
+            sections = self.get("details", {}).get("sections", [{}])
+            self.isin = self.get("icon", "")
             self.isin = self.isin[self.isin.find("/") + 1 :]
             self.isin = self.isin[: self.isin.find("/")]
             isin2 = self.isin
@@ -174,7 +173,7 @@ class Event(UserDict):
         self.determine_pp_type()
 
     def set_details(self, details):
-        self.json["details"] = details
+        self["details"] = details
         self.process_event()
 
     def get_documents(self, response):

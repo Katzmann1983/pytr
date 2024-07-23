@@ -134,7 +134,7 @@ class Timeline:
                 dl.dl_doc(doc)
 
         if len(documents) > 0:
-            self.events_with_docs.append(event.json)
+            self.events_with_docs.append(event.data)
         else:
-            self.events_without_docs.append(event.json)
+            self.events_without_docs.append(event.data)
         
