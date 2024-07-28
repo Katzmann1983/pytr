@@ -32,6 +32,10 @@ def get_logger(name=__name__, verbosity=None):
     logger.propagate = False
 
     if log_level == 'debug':
+        # (over)write logs to file
+        logging.basicConfig(filename='debug.log', filemode='w+', level=logging.DEBUG)
+        # need logs from other classes
+        logger.propagate = True
         fmt = '%(asctime)s %(name)-9s %(levelname)-8s %(message)s'
         datefmt = '%Y-%m-%d %H:%M:%S%z'
     else:
