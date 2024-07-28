@@ -1,6 +1,7 @@
 from datetime import datetime
 from collections import UserDict
 import re
+from .file_destination_provider import Pattern
 
 tr_eventType_to_pp_type = {
     "CREDIT": "DIVIDENDS",
@@ -28,9 +29,15 @@ subfolder = {
     }
 
 
-class Document(UserDict):
-    def __init__(self, doc, event):
+class Document(UserDict, Pattern):
+    def __init__(self, doc, event, section_title):
         super().__init__(doc)
+        # initialize the Pattern attributes
+        self.event_type = event.eventType
+        self.event_subtitle = event.subtitle
+        self.event_title = event.title
+        self.section_title = section_title
+        self.document_title = doc['title']
         try:
             timestamp = datetime.strptime(doc['detail'], '%d.%m.%Y').timestamp()
         except (ValueError, KeyError):
@@ -55,45 +62,6 @@ class Document(UserDict):
         self.doc_type_num = doc_type_num
 
 
-    def get_filename(self, filename_fmt):
-        try:
-            date = self['detail']
-            iso_date = '-'.join(date.split('.')[::-1])
-        except KeyError:
-            date = ''
-            iso_date = ''
-        doc_id = self['id']
-
-        # extract time from subtitleText
-        try:
-            time = re.findall('um (\\d+:\\d+) Uhr', self.event_subtitle)
-            if time == []:
-                time = ''
-            else:
-                time = f' {time[0]}'
-        except TypeError:
-            time = ''
-
-        titleText = self.title.replace('\n', '').replace('/', '-')
-        subtitleText = self.event_subtitle.replace('\n', '').replace('/', '-')
-
-        filename = filename_fmt.format(
-            iso_date=iso_date, time=time, title=titleText, subtitle=subtitleText, doc_num=self.doc_type_num, id=doc_id
-        )
-        return filename
-
-    def get_filepath(self, output_path, filename_fmt):
-        filename = self.get_filename(filename_fmt)
-        if self.event_subfolder is not None:
-            directory = output_path / self.event_subfolder
-        else:
-            directory = output_path
-
-        if self.doc_type in ['Kontoauszug', 'Depotauszug']:
-            filepath = directory / 'Abschlüsse' / f'{filename}' / f'{self.doc_type}.pdf'
-        else:
-            filepath = directory / self.doc_type / f'{filename}.pdf'
-        return filepath
 
 
 class Event(UserDict):
@@ -182,5 +150,5 @@ class Event(UserDict):
             if section['type'] != 'documents':
                 continue
             for doc in section['data']:
-                documents.append(Document(doc, self))
+                documents.append(Document(doc, self, section['title']))
         return documents

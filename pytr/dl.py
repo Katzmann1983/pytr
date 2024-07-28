@@ -13,7 +13,9 @@ from pytr.api import TradeRepublicError
 from pytr.timeline import Timeline
 from .event import Document
 from .transactions import export_transactions
+from pytr.file_destination_provider import FileDestinationProvider
 
+fdp = FileDestinationProvider()
 
 class DL:
     def __init__(
@@ -107,9 +109,7 @@ class DL:
 
         doc_url = doc['action']['payload']
         
-        filename = doc.get_filename(self.filename_fmt)
-
-        filepath = doc.get_filepath(self.output_path, self.filename_fmt)
+        filepath = self.output_path / fdp.get_file_path(doc)
 
         if self.universal_filepath:
             filepath = sanitize_filepath(filepath, '_', 'universal')
