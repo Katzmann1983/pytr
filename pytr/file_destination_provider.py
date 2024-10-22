@@ -113,7 +113,7 @@ class FileDestinationProvider:
         document_title (str): The document title
         timestamp
         """
-        variables = {}
+        variables = DefaultFormateValue()
         variables["iso_date"] = timestamp.strftime("%Y-%m-%d")
         variables["iso_date_year"] = timestamp.strftime("%Y")
         variables["iso_date_month"] = timestamp.strftime("%m")
@@ -154,14 +154,13 @@ class FileDestinationProvider:
                 f"No destination config found for the given parameters: event: {event},section_title:{section_title},document_title:{document_title}"
             )
             return self.__create_file_path(self._unknown_file_config, variables)
-
-        if len(matching_configs) > 1:
+        elif len(matching_configs) > 1:
             self._log.debug(
                 f"Multiple Destination Patterns where found. Using 'multiple_match' config! Parameter: event_type:{event}, section_title:{section_title},document_title:{document_title}"
             )
             return self.__create_file_path(self._multiple_match_file_config, variables)
-
-        return self.__create_file_path(matching_configs[0], variables)
+        else:
+            return self.__create_file_path(matching_configs[0], variables)
 
     @staticmethod
     def __is_matching_config(
@@ -172,15 +171,13 @@ class FileDestinationProvider:
             getattr(pattern, field_name, None), search_pattern
         )
 
-    def __create_file_path(self, config: DestinationConfig, variables: dict):
-        formate_variables = DefaultFormateValue(variables)
-
+    def __create_file_path(self, config: DestinationConfig, variables: DefaultFormateValue):
         path = config.path
         filename = config.filename
         if filename is None:
             filename = self._default_file_config.filename
 
-        return os.path.join(path, filename).format_map(formate_variables)
+        return os.path.join(path, filename).format_map(variables)
 
     def __extract_pattern(self, pattern_config: list) -> list:
         patterns = []

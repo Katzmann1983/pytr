@@ -33,7 +33,7 @@ class DL:
         self.tr = tr
         self.output_path = Path(output_path)
         self.history_file = self.output_path / history_file
-        self.file_destination_provider = self.__get_file_destination_provider()
+        self.file_destination_provider = FileDestinationProvider()
         self.since_timestamp = since_timestamp
         self.universal_filepath = universal_filepath
         self.sort_export = sort_export
@@ -183,5 +183,3 @@ class DL:
                     self.log.info("Done.")
                     exit(0)
 
-    def __get_file_destination_provider(self):
-        return FileDestinationProvider()
